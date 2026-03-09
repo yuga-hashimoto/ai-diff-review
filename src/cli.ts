@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { parseDiff } from './parser.js';
 import { analyzeDiff } from './analyzer.js';
 import { formatResult } from './formatters.js';
+import { loadConfig } from './config.js';
 
 const VERSION = '1.0.0';
 
@@ -13,6 +14,7 @@ interface CLIOptions {
   staged: boolean;
   file: string | null;
   ref: string | null;
+  config: string | null;
   verbose: boolean;
 }
 
@@ -22,6 +24,7 @@ function parseArgs(args: string[]): CLIOptions {
     staged: false,
     file: null,
     ref: null,
+    config: null,
     verbose: false,
   };
 
@@ -41,6 +44,10 @@ function parseArgs(args: string[]): CLIOptions {
       case '--ref':
       case '-r':
         opts.ref = args[++i] || null;
+        break;
+      case '--config':
+      case '-c':
+        opts.config = args[++i] || null;
         break;
       case '--verbose':
       case '-v':
@@ -74,7 +81,8 @@ USAGE:
 OPTIONS:
   --staged, -s       Analyze staged changes (git diff --cached)
   --ref, -r <ref>    Analyze diff against a git ref (branch, commit, tag)
-  --file <path>      Read diff from a file instead of stdin/git
+  --file <path>      Read diff from a file
+  --config, -c <path> Config file path (.ai-diff-review.json)
   --format, -f <fmt> Output format: text (default), json, markdown
   --verbose, -v      Show detailed analysis info
   --version          Show version
@@ -82,6 +90,7 @@ OPTIONS:
 
 ENVIRONMENT:
   OPENAI_API_KEY     Required for OpenAI provider
+  ANTHROPIC_API_KEY  Required for Anthropic provider
   OLLAMA_HOST        Ollama server URL (default: http://localhost:11434)
 
 CONFIG:
@@ -108,17 +117,15 @@ EXAMPLES:
 }
 
 function getDiffInput(opts: CLIOptions): string {
-  // 1. From file
   if (opts.file) {
     try {
       return readFileSync(opts.file, 'utf-8');
-    } catch (err) {
+    } catch {
       console.error(`Error: Cannot read file '${opts.file}'`);
       process.exit(1);
     }
   }
 
-  // 2. From git
   if (opts.staged || opts.ref) {
     try {
       const cmd = opts.staged
@@ -131,7 +138,6 @@ function getDiffInput(opts: CLIOptions): string {
     }
   }
 
-  // 3. From stdin (piped)
   if (!process.stdin.isTTY) {
     try {
       return readFileSync('/dev/stdin', 'utf-8');
@@ -141,7 +147,6 @@ function getDiffInput(opts: CLIOptions): string {
     }
   }
 
-  // 4. Default: unstaged changes
   try {
     const diff = execSync('git diff', { encoding: 'utf-8' });
     if (!diff.trim()) {
@@ -157,8 +162,11 @@ function getDiffInput(opts: CLIOptions): string {
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
+  const config = loadConfig(opts.config ?? undefined);
 
   if (opts.verbose) {
+    console.error(`[ai-diff-review] Provider: ${config.provider}`);
+    console.error(`[ai-diff-review] Model: ${config.model}`);
     console.error('[ai-diff-review] Starting analysis...');
   }
 
@@ -175,14 +183,11 @@ async function main(): Promise<void> {
   }
 
   try {
-    const result = await analyzeDiff(files);
+    const result = await analyzeDiff(files, opts.config ?? undefined);
     const output = formatResult(result, opts.format);
     console.log(output);
 
-    // Exit with non-zero if score below threshold
-    const config = await import('./config.js');
-    const cfg = config.loadConfig();
-    if (result.trustScore.overall < cfg.threshold) {
+    if (result.trustScore.overall < config.threshold) {
       process.exit(1);
     }
   } catch (err) {
