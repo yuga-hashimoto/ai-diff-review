@@ -132,10 +132,10 @@ export function parseDiff(diffContent: string): DiffFile[] {
         oldLine: oldLineNum,
       });
       oldLineNum++;
-    } else if (line.startsWith(' ') || line === '') {
+    } else if (line.startsWith(' ')) {
       currentChunk.changes.push({
         type: 'context',
-        content: line.startsWith(' ') ? line.substring(1) : '',
+        content: line.substring(1),
         oldLine: oldLineNum,
         newLine: newLineNum,
       });
