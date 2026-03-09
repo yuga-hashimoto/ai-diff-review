@@ -1,0 +1,14 @@
+{
+  "model": "llama3.2",
+  "provider": "ollama",
+  "threshold": 70,
+  "rules": [
+    "All async functions must have error handling",
+    "No implicit any types allowed"
+  ],
+  "ignorePatterns": [
+    ".*\\.test\\.ts$",
+    ".*\\.spec\\.ts$",
+    "package-lock\\.json"
+  ]
+}
