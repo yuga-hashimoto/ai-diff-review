@@ -1,4 +1,4 @@
-import { DiffFile, AnalysisResult, TrustScore, AnalysisCategory, IssueSeverity } from './types.js';
+import { DiffFile, AnalysisResult, AnalysisIssue, AnalysisCategory, IssueSeverity } from './types.js';
 import { createProvider } from './providers/index.js';
 import { loadConfig } from './config.js';
 import { calculateTrustScore } from './scorer.js';
@@ -30,30 +30,27 @@ For each issue found, respond in this JSON format:
 
 Be thorough but avoid false positives. Only flag real concerns.`;
 
-export interface AnalysisIssue {
-  category: AnalysisCategory;
-  severity: IssueSeverity;
-  file: string;
-  line: number | null;
-  title: string;
-  description: string;
-  suggestion: string;
-}
-
 interface LLMResponse {
   issues: AnalysisIssue[];
   summary: string;
 }
 
-export async function analyzeDiff(files: DiffFile[]): Promise<AnalysisResult> {
-  const config = loadConfig();
+/**
+ * Analyze parsed diff files using an LLM provider.
+ * Returns trust scores, issues, and summary.
+ */
+export async function analyzeDiff(
+  files: DiffFile[],
+  configPath?: string,
+): Promise<AnalysisResult> {
+  const config = loadConfig(configPath);
   const provider = createProvider(config);
 
   const diffContent = files
     .map((f) => {
       const status = f.isNew ? '(new file)' : f.isDeleted ? '(deleted)' : '(modified)';
       return `--- ${f.oldPath} ${status}\n+++ ${f.newPath}\n${f.chunks
-        .map((c) => `@@ -${c.oldStart},${c.oldLines} +${c.newStart},${c.newLines} @@\n${c.changes
+        .map((c) => `@@ -${c.oldStart},${c.oldLines} +${c.newStart},${c.newLines} @@${c.header ? ' ' + c.header : ''}\n${c.changes
           .map((ch) => `${ch.type === 'add' ? '+' : ch.type === 'delete' ? '-' : ' '}${ch.content}`)
           .join('\n')}`)
         .join('\n')}`;
@@ -71,28 +68,20 @@ export async function analyzeDiff(files: DiffFile[]): Promise<AnalysisResult> {
 
   const totalAdditions = files.reduce(
     (sum, f) => sum + f.chunks.reduce(
-      (s, c) => s + c.changes.filter((ch) => ch.type === 'add').length, 0
-    ), 0
+      (s, c) => s + c.changes.filter((ch) => ch.type === 'add').length, 0,
+    ), 0,
   );
   const totalDeletions = files.reduce(
     (sum, f) => sum + f.chunks.reduce(
-      (s, c) => s + c.changes.filter((ch) => ch.type === 'delete').length, 0
-    ), 0
+      (s, c) => s + c.changes.filter((ch) => ch.type === 'delete').length, 0,
+    ), 0,
   );
 
   return {
     files: files.map((f) => f.newPath || f.oldPath),
     totalAdditions,
     totalDeletions,
-    issues: parsed.issues.map((issue) => ({
-      category: issue.category,
-      severity: issue.severity,
-      file: issue.file,
-      line: issue.line,
-      title: issue.title,
-      description: issue.description,
-      suggestion: issue.suggestion,
-    })),
+    issues: parsed.issues,
     trustScore,
     summary: parsed.summary,
     provider: config.provider,
@@ -103,17 +92,18 @@ export async function analyzeDiff(files: DiffFile[]): Promise<AnalysisResult> {
 
 function parseResponse(text: string): LLMResponse {
   // Extract JSON from potential markdown code blocks
-  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, text];
-  const jsonStr = (jsonMatch[1] || text).trim();
+  const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonStr = (jsonMatch?.[1] ?? text).trim();
 
   try {
     const parsed = JSON.parse(jsonStr);
     return {
-      issues: Array.isArray(parsed.issues) ? parsed.issues.map(validateIssue).filter(Boolean) as AnalysisIssue[] : [],
+      issues: Array.isArray(parsed.issues)
+        ? parsed.issues.map(validateIssue).filter((i): i is AnalysisIssue => i !== null)
+        : [],
       summary: typeof parsed.summary === 'string' ? parsed.summary : 'Analysis complete.',
     };
   } catch {
-    // If JSON parsing fails, return empty result
     return {
       issues: [],
       summary: 'Failed to parse LLM response. Raw output may contain useful information.',
@@ -128,16 +118,13 @@ function validateIssue(raw: unknown): AnalysisIssue | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
 
-  const category = VALID_CATEGORIES.includes(obj.category as AnalysisCategory)
-    ? (obj.category as AnalysisCategory)
-    : 'code-quality';
-  const severity = VALID_SEVERITIES.includes(obj.severity as IssueSeverity)
-    ? (obj.severity as IssueSeverity)
-    : 'medium';
-
   return {
-    category,
-    severity,
+    category: VALID_CATEGORIES.includes(obj.category as AnalysisCategory)
+      ? (obj.category as AnalysisCategory)
+      : 'code-quality',
+    severity: VALID_SEVERITIES.includes(obj.severity as IssueSeverity)
+      ? (obj.severity as IssueSeverity)
+      : 'medium',
     file: typeof obj.file === 'string' ? obj.file : 'unknown',
     line: typeof obj.line === 'number' ? obj.line : null,
     title: typeof obj.title === 'string' ? obj.title : 'Unnamed issue',
