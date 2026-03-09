@@ -1,37 +1,57 @@
-import { CategoryScores, Issue, ReviewResult } from './types.js';
+import { AnalysisIssue, TrustScore, IssueSeverity, AnalysisCategory } from './types.js';
 
-const SEVERITY_WEIGHTS: Record<Issue['severity'], number> = {
+const SEVERITY_PENALTIES: Record<IssueSeverity, number> = {
   critical: 25,
   high: 15,
   medium: 8,
   low: 3,
+  info: 0,
 };
 
-const CATEGORY_WEIGHTS: Record<keyof CategoryScores, number> = {
-  security: 0.30,
-  typeSafety: 0.20,
-  edgeCases: 0.20,
-  testCoverage: 0.15,
-  codeQuality: 0.15,
+const CATEGORY_WEIGHTS: Record<AnalysisCategory, keyof Omit<TrustScore, 'overall'>> = {
+  'type-safety': 'typeSafety',
+  'edge-cases': 'edgeCases',
+  'security': 'security',
+  'test-coverage': 'testCoverage',
+  'code-quality': 'codeQuality',
 };
 
-export function calculateScore(
-  issues: Issue[],
-  categories: CategoryScores,
-  _totalLines: number
-): Omit<ReviewResult, 'summary' | 'filesAnalyzed' | 'linesChanged' | 'issues'> {
-  let weightedScore = 0;
-  for (const [category, weight] of Object.entries(CATEGORY_WEIGHTS)) {
-    weightedScore += categories[category as keyof CategoryScores] * weight;
-  }
+/**
+ * Calculate trust score from analysis issues.
+ * Starts at 100 and deducts points per issue severity.
+ * Each category gets its own sub-score.
+ */
+export function calculateTrustScore(issues: AnalysisIssue[]): TrustScore {
+  const categoryPenalties: Record<string, number> = {
+    typeSafety: 0,
+    edgeCases: 0,
+    security: 0,
+    testCoverage: 0,
+    codeQuality: 0,
+  };
 
-  let issuePenalty = 0;
+  let totalPenalty = 0;
+
   for (const issue of issues) {
-    issuePenalty += SEVERITY_WEIGHTS[issue.severity];
+    const penalty = SEVERITY_PENALTIES[issue.severity];
+    totalPenalty += penalty;
+
+    const scoreKey = CATEGORY_WEIGHTS[issue.category];
+    if (scoreKey) {
+      categoryPenalties[scoreKey] += penalty;
+    }
   }
-  issuePenalty = Math.min(issuePenalty, 60);
 
-  const finalScore = Math.max(0, Math.min(100, Math.round(weightedScore - issuePenalty)));
+  return {
+    overall: clamp(100 - totalPenalty),
+    typeSafety: clamp(100 - categoryPenalties.typeSafety),
+    edgeCases: clamp(100 - categoryPenalties.edgeCases),
+    security: clamp(100 - categoryPenalties.security),
+    testCoverage: clamp(100 - categoryPenalties.testCoverage),
+    codeQuality: clamp(100 - categoryPenalties.codeQuality),
+  };
+}
 
-  return { score: finalScore, categories };
+function clamp(value: number): number {
+  return Math.max(0, Math.min(100, value));
 }
