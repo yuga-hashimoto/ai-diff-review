@@ -1,64 +1,100 @@
-export interface ReviewOptions {
-  model?: string;
-  provider?: 'ollama' | 'openai' | 'anthropic';
-  threshold?: number;
-  rules?: string[];
-  ignorePatterns?: string[];
-}
-
-export interface ReviewResult {
-  score: number;
-  categories: CategoryScores;
-  issues: Issue[];
-  summary: string;
-  filesAnalyzed: number;
-  linesChanged: number;
-}
-
-export interface CategoryScores {
-  typeSafety: number;
-  security: number;
-  edgeCases: number;
-  testCoverage: number;
-  codeQuality: number;
-}
-
-export interface Issue {
-  file: string;
-  line: number;
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  category: string;
-  message: string;
-  suggestion?: string;
-}
-
+/**
+ * Parsed diff file
+ */
 export interface DiffFile {
-  path: string;
+  oldPath: string;
+  newPath: string;
+  isNew: boolean;
+  isDeleted: boolean;
+  isBinary: boolean;
   language: string;
-  additions: DiffLine[];
-  deletions: DiffLine[];
-  hunks: DiffHunk[];
+  chunks: DiffChunk[];
 }
 
-export interface DiffLine {
-  lineNumber: number;
-  content: string;
-}
-
-export interface DiffHunk {
+export interface DiffChunk {
   oldStart: number;
   oldLines: number;
   newStart: number;
   newLines: number;
+  header: string;
+  changes: DiffChange[];
+}
+
+export interface DiffChange {
+  type: 'add' | 'delete' | 'context';
   content: string;
+  oldLine?: number;
+  newLine?: number;
 }
 
-export interface LLMAnalysis {
-  categories: CategoryScores;
-  issues: Issue[];
+/**
+ * Analysis categories for trust scoring
+ */
+export type AnalysisCategory =
+  | 'type-safety'
+  | 'edge-cases'
+  | 'security'
+  | 'test-coverage'
+  | 'code-quality';
+
+export type IssueSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+/**
+ * A single issue found during analysis
+ */
+export interface AnalysisIssue {
+  category: AnalysisCategory;
+  severity: IssueSeverity;
+  file: string;
+  line: number | null;
+  title: string;
+  description: string;
+  suggestion: string;
+}
+
+/**
+ * Trust score breakdown
+ */
+export interface TrustScore {
+  overall: number;       // 0-100
+  typeSafety: number;
+  edgeCases: number;
+  security: number;
+  testCoverage: number;
+  codeQuality: number;
+}
+
+/**
+ * Full analysis result
+ */
+export interface AnalysisResult {
+  files: string[];
+  totalAdditions: number;
+  totalDeletions: number;
+  issues: AnalysisIssue[];
+  trustScore: TrustScore;
   summary: string;
+  provider: string;
+  model: string;
+  analysisTime: number;
 }
 
+/**
+ * LLM provider interface
+ */
 export interface LLMProvider {
   analyze(prompt: string): Promise<string>;
+}
+
+/**
+ * Configuration
+ */
+export interface Config {
+  provider: 'openai' | 'ollama' | 'anthropic';
+  model: string;
+  threshold: number;
+  apiKey?: string;
+  ollamaHost?: string;
+  rules?: string[];
+  ignorePatterns?: string[];
 }
