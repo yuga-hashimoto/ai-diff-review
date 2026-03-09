@@ -3,6 +3,7 @@ export { analyzeDiff } from './analyzer.js';
 export { calculateTrustScore } from './scorer.js';
 export { loadConfig } from './config.js';
 export { formatResult } from './formatters.js';
+export { createProvider } from './providers/index.js';
 export type {
   DiffFile,
   DiffChunk,
@@ -13,4 +14,5 @@ export type {
   AnalysisCategory,
   IssueSeverity,
   Config,
+  LLMProvider,
 } from './types.js';
